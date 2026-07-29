@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { RefreshCw, TrendingUp, TrendingDown, Minus, Activity, Radio, Settings2, KeyRound } from "lucide-react";
+import { RefreshCw, TrendingUp, TrendingDown, Minus, Activity, Radio, Settings2, KeyRound, Copy, Check } from "lucide-react";
 
 const ASSETS = [
-  { symbol: "EUR/USD", label: "EUR / USD" },
-  { symbol: "GBP/USD", label: "GBP / USD" },
-  { symbol: "USD/JPY", label: "USD / JPY" },
-  { symbol: "AUD/USD", label: "AUD / USD" },
-  { symbol: "USD/CAD", label: "USD / CAD" },
-  { symbol: "EUR/JPY", label: "EUR / JPY" },
+  { symbol: "EUR/USD", label: "EUR / USD", otcLabel: "EURUSD_OTC" },
+  { symbol: "GBP/USD", label: "GBP / USD", otcLabel: "GBPUSD_OTC" },
+  { symbol: "USD/JPY", label: "USD / JPY", otcLabel: "USDJPY_OTC" },
+  { symbol: "AUD/USD", label: "AUD / USD", otcLabel: "AUDUSD_OTC" },
+  { symbol: "USD/CAD", label: "USD / CAD", otcLabel: "USDCAD_OTC" },
+  { symbol: "EUR/JPY", label: "EUR / JPY", otcLabel: "EURJPY_OTC" },
 ];
 
 const INTERVALS = [
-  { value: "1min", label: "1m" },
-  { value: "5min", label: "5m" },
-  { value: "15min", label: "15m" },
+  { value: "1min", label: "1m", minutes: 1 },
+  { value: "5min", label: "5m", minutes: 5 },
+  { value: "15min", label: "15m", minutes: 15 },
 ];
 
 const INDICATOR_KEYS = ["trend", "momentum", "macd", "meanReversion"];
@@ -90,12 +90,12 @@ function computeIndicatorScores(closes) {
 function compositeSignal(scores, weights) {
   const totalWeight = INDICATOR_KEYS.reduce((s, k) => s + weights[k], 0) || 1;
   const composite = INDICATOR_KEYS.reduce((s, k) => s + scores[k] * weights[k], 0) / totalWeight;
-  let label = "NEUTRAL", tone = "neutral";
-  if (composite > 0.45) { label = "STRONG BUY"; tone = "bull"; }
-  else if (composite > 0.15) { label = "BUY"; tone = "bull"; }
-  else if (composite < -0.45) { label = "STRONG SELL"; tone = "bear"; }
-  else if (composite < -0.15) { label = "SELL"; tone = "bear"; }
-  return { composite, label, tone };
+  let label = "NEUTRAL", tone = "neutral", direction = null;
+  if (composite > 0.45) { label = "STRONG BUY"; tone = "bull"; direction = "BUY"; }
+  else if (composite > 0.15) { label = "BUY"; tone = "bull"; direction = "BUY"; }
+  else if (composite < -0.45) { label = "STRONG SELL"; tone = "bear"; direction = "SELL"; }
+  else if (composite < -0.15) { label = "SELL"; tone = "bear"; direction = "SELL"; }
+  return { composite, label, tone, direction };
 }
 
 async function loadWeights() {
@@ -157,6 +157,66 @@ function SignalIcon({ tone }) {
   return <Minus size={16} strokeWidth={2.5} />;
 }
 
+// Format a Date as HH:MM in WAT (West Africa Time, UTC+1, no daylight saving)
+function formatWAT(date) {
+  return new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Africa/Lagos",
+  }).format(date);
+}
+
+function buildAlertText(asset, signal, intervalMinutes) {
+  const now = new Date();
+  const expiry = new Date(now.getTime() + intervalMinutes * 60000);
+  const entryStr = formatWAT(now);
+  const expiryStr = formatWAT(expiry);
+  const confidence = Math.round(Math.abs(signal.composite) * 100);
+  const direction = signal.direction || "NO TRADE";
+
+  return [
+    `📊 ${asset.otcLabel}`,
+    `🎯 Direction: ${direction}`,
+    `⚡ Confidence: ${confidence}%`,
+    `⏰ Entry: ${entryStr} WAT`,
+    `🔚 Expiry: ${expiryStr} WAT`,
+  ].join("\n");
+}
+
+function AlertBlock({ asset, signal, intervalMinutes }) {
+  const [copied, setCopied] = useState(false);
+  const text = buildAlertText(asset, signal, intervalMinutes);
+  const noTrade = !signal.direction;
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-[#20222C]">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="font-mono text-[9px] text-[#6B6F7B] uppercase tracking-wide">
+          {noTrade ? "no qualifying signal" : "entry alert"}
+        </span>
+        {!noTrade && (
+          <button onClick={handleCopy} className="flex items-center gap-1 font-mono text-[9px] text-[#6B6F7B] hover:text-[#E7E5E0]">
+            {copied ? <Check size={11} /> : <Copy size={11} />}
+            {copied ? "copied" : "copy"}
+          </button>
+        )}
+      </div>
+      <pre className="font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-[#C9CCD6] bg-[#0F1016] rounded-lg p-3 border border-[#20222C]">
+        {text}
+      </pre>
+    </div>
+  );
+}
+
 export default function MarketScanner() {
   const [interval_, setInterval_] = useState("5min");
   const [assetData, setAssetData] = useState({});
@@ -171,6 +231,8 @@ export default function MarketScanner() {
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [showKeyPanel, setShowKeyPanel] = useState(false);
   const historyRef = useRef([]);
+
+  const intervalMinutes = INTERVALS.find((iv) => iv.value === interval_)?.minutes || 5;
 
   useEffect(() => {
     (async () => {
@@ -390,13 +452,14 @@ export default function MarketScanner() {
                     );
                   })}
                 </div>
+                <AlertBlock asset={asset} signal={signal} intervalMinutes={intervalMinutes} />
               </div>
             );
           })}
         </div>
         <div className="mt-8 pt-5 border-t border-[#20222C] font-mono text-[11px] text-[#6B6F7B] leading-relaxed">
           <Activity size={12} className="inline mr-1.5 -mt-0.5" />
-          Composite score blends trend (EMA9/21), momentum (RSI-14), MACD histogram, and Bollinger mean-reversion, weighted by each indicator's live win rate against 15-minute-forward price moves — weights update automatically as history accumulates. Live forex feed via Twelve Data; IQ Option's weekend OTC pairs are synthetic but track the same underlying rate, so signals carry over. On fixed-payout, short-expiry instruments the payout structure (typically 70–90% return vs. 100% loss) means you need real accuracy above roughly 55–58% just to break even, so treat conviction % as one input, not a trigger on its own.
+          Composite score blends trend (EMA9/21), momentum (RSI-14), MACD histogram, and Bollinger mean-reversion, weighted by each indicator's live win rate against 15-minute-forward price moves — weights update automatically as history accumulates. Live forex feed via Twelve Data; IQ Option's weekend OTC pairs are synthetic but track the same underlying rate, so signals carry over. Confidence % here is the actual computed indicator agreement — not inflated, and no martingale ladder is included: doubling stakes after each loss compounds risk faster than it recovers it, especially against a sub-100% payout. On fixed-payout, short-expiry instruments the payout structure (typically 70–90% return vs. 100% loss) means you need real accuracy above roughly 55–58% just to break even, so treat confidence % as one input, not a trigger on its own.
         </div>
       </div>
     </div>
