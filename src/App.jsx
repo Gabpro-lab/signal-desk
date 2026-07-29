@@ -168,9 +168,11 @@ function formatWAT(date) {
 }
 
 function buildAlertText(asset, signal, intervalMinutes) {
+  const PREP_MINUTES = 5;
   const now = new Date();
-  const expiry = new Date(now.getTime() + intervalMinutes * 60000);
-  const entryStr = formatWAT(now);
+  const entry = new Date(now.getTime() + PREP_MINUTES * 60000);
+  const expiry = new Date(entry.getTime() + intervalMinutes * 60000);
+  const entryStr = formatWAT(entry);
   const expiryStr = formatWAT(expiry);
   const confidence = Math.round(Math.abs(signal.composite) * 100);
   const direction = signal.direction || "NO TRADE";
